@@ -1,0 +1,36 @@
+{
+  "name": "waiola-rfq",
+  "version": "1.0.0",
+  "description": "Private RFQ settlement on Uniswap v4 with ENS-based maker discovery and Noir ZK enforcement",
+  "scripts": {
+    "maker:server": "ts-node script/typescript/maker/server.ts",
+    "maker:ens-setup": "ts-node script/typescript/maker/ens-setup.ts",
+    "taker:request": "ts-node script/typescript/taker/request-quote.ts",
+    "taker:prove": "ts-node script/typescript/taker/generate-proof.ts",
+    "taker:swap": "ts-node script/typescript/taker/execute-swap.ts",
+    "demo": "forge script script/solidity/04_FullDemo.s.sol --broadcast"
+  },
+  "keywords": [
+    "uniswap",
+    "v4",
+    "hooks",
+    "rfq",
+    "zk",
+    "noir",
+    "ens",
+    "privacy"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@ensdomains/ensjs": "^3.0.0",
+    "ethers": "^6.16.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
