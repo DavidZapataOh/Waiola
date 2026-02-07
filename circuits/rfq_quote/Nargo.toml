@@ -1,0 +1,6 @@
+[package]
+name = "rfq_quote"
+type = "bin"
+authors = [""]
+
+[dependencies]
