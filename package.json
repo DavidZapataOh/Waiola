@@ -9,7 +9,11 @@
     "taker:request": "ts-node script/typescript/taker/request-quote.ts",
     "taker:prove": "ts-node script/typescript/taker/generate-proof.ts",
     "taker:swap": "ts-node script/typescript/taker/execute-swap.ts",
-    "demo": "forge script script/solidity/04_FullDemo.s.sol --broadcast"
+    "demo": "./script/demo.sh",
+    "deploy:sepolia": "./script/demo.sh sepolia",
+    "deploy:base-sepolia": "./script/demo.sh base-sepolia",
+    "deploy:arbitrum-sepolia": "./script/demo.sh arbitrum-sepolia",
+    "deploy:local": "./script/demo.sh local"
   },
   "keywords": [
     "uniswap",

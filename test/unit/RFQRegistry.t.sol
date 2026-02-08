@@ -324,4 +324,185 @@ contract RFQRegistryTest is Test {
         assertTrue(registry.isCommitted(commitment3));
         assertFalse(registry.isConsumed(commitment3));
     }
+
+    /*//////////////////////////////////////////////////////////////
+                      ADDITIONAL FUZZ TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testFuzz_ConsumeQuote(
+        bytes32 commitment,
+        uint256 expiry,
+        address _maker,
+        bytes32 poolKeyHash
+    ) public {
+        vm.assume(commitment != bytes32(0));
+        vm.assume(expiry > 0);
+        vm.assume(_maker != address(0));
+
+        vm.prank(owner);
+        registry.setHook(hook);
+
+        registry.commitQuote(commitment, expiry, _maker, poolKeyHash);
+        assertFalse(registry.isConsumed(commitment));
+
+        vm.prank(hook);
+        registry.consumeQuote(commitment);
+        assertTrue(registry.isConsumed(commitment));
+
+        // Replay must always fail
+        vm.prank(hook);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                RFQRegistry.RFQRegistry__CommitmentAlreadyUsed.selector,
+                commitment
+            )
+        );
+        registry.consumeQuote(commitment);
+    }
+
+    function testFuzz_CommitQuote_DifferentMakers(
+        bytes32 commitment1,
+        bytes32 commitment2,
+        address maker1,
+        address maker2
+    ) public {
+        vm.assume(commitment1 != commitment2);
+        vm.assume(commitment1 != bytes32(0));
+        vm.assume(commitment2 != bytes32(0));
+        vm.assume(maker1 != address(0));
+        vm.assume(maker2 != address(0));
+
+        registry.commitQuote(commitment1, EXPIRY, maker1, POOL_KEY_HASH);
+        registry.commitQuote(commitment2, EXPIRY, maker2, POOL_KEY_HASH);
+
+        RFQRegistry.CommitmentData memory data1 = registry.getCommitment(commitment1);
+        RFQRegistry.CommitmentData memory data2 = registry.getCommitment(commitment2);
+
+        assertEq(data1.maker, maker1);
+        assertEq(data2.maker, maker2);
+    }
+
+    function testFuzz_CommitQuote_DifferentPools(
+        bytes32 pool1,
+        bytes32 pool2
+    ) public {
+        vm.assume(pool1 != pool2);
+
+        bytes32 commitment1 = keccak256(abi.encode("c1", pool1));
+        bytes32 commitment2 = keccak256(abi.encode("c2", pool2));
+
+        registry.commitQuote(commitment1, EXPIRY, maker, pool1);
+        registry.commitQuote(commitment2, EXPIRY, maker, pool2);
+
+        assertEq(registry.getCommitment(commitment1).poolKeyHash, pool1);
+        assertEq(registry.getCommitment(commitment2).poolKeyHash, pool2);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       EDGE CASE TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_CommitQuote_ZeroExpiry() public {
+        // expiry=0 is used as sentinel for "not committed"
+        // Committing with expiry=0 stores it but isCommitted returns false
+        bytes32 testCommitment = keccak256("zero_expiry");
+        registry.commitQuote(testCommitment, 0, maker, POOL_KEY_HASH);
+
+        // isCommitted returns false because expiry != 0 is the existence check
+        assertFalse(registry.isCommitted(testCommitment));
+    }
+
+    function test_CommitQuote_MaxExpiry() public {
+        bytes32 testCommitment = keccak256("max_expiry");
+        uint256 maxExpiry = type(uint256).max;
+
+        registry.commitQuote(testCommitment, maxExpiry, maker, POOL_KEY_HASH);
+
+        RFQRegistry.CommitmentData memory data = registry.getCommitment(testCommitment);
+        assertEq(data.expiry, maxExpiry);
+        assertTrue(registry.isCommitted(testCommitment));
+    }
+
+    function test_CommitQuote_ZeroPoolKeyHash() public {
+        bytes32 testCommitment = keccak256("zero_pool");
+
+        registry.commitQuote(testCommitment, EXPIRY, maker, bytes32(0));
+
+        RFQRegistry.CommitmentData memory data = registry.getCommitment(testCommitment);
+        assertEq(data.poolKeyHash, bytes32(0));
+    }
+
+    function test_SetHook_CanUpdateHook() public {
+        address newHook = makeAddr("new_hook");
+
+        vm.prank(owner);
+        registry.setHook(hook);
+        assertEq(registry.hook(), hook);
+
+        vm.prank(owner);
+        registry.setHook(newHook);
+        assertEq(registry.hook(), newHook);
+    }
+
+    function test_ConsumeQuote_OldHookCannotConsumeAfterUpdate() public {
+        vm.prank(owner);
+        registry.setHook(hook);
+
+        registry.commitQuote(COMMITMENT, EXPIRY, maker, POOL_KEY_HASH);
+
+        // Update hook to new address
+        address newHook = makeAddr("new_hook");
+        vm.prank(owner);
+        registry.setHook(newHook);
+
+        // Old hook can no longer consume
+        vm.prank(hook);
+        vm.expectRevert(RFQRegistry.RFQRegistry__Unauthorized.selector);
+        registry.consumeQuote(COMMITMENT);
+
+        // New hook can consume
+        vm.prank(newHook);
+        registry.consumeQuote(COMMITMENT);
+        assertTrue(registry.isConsumed(COMMITMENT));
+    }
+
+    function test_CommitQuote_AnybodyCanCommit() public {
+        // Verify anyone can commit quotes (not just owner)
+        address randomUser = makeAddr("random");
+        bytes32 testCommitment = keccak256("random_commit");
+
+        vm.prank(randomUser);
+        registry.commitQuote(testCommitment, EXPIRY, maker, POOL_KEY_HASH);
+
+        assertTrue(registry.isCommitted(testCommitment));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                          GAS BENCHMARKS
+    //////////////////////////////////////////////////////////////*/
+
+    function testGas_CommitQuote() public {
+        registry.commitQuote(COMMITMENT, EXPIRY, maker, POOL_KEY_HASH);
+    }
+
+    function testGas_ConsumeQuote() public {
+        vm.prank(owner);
+        registry.setHook(hook);
+        registry.commitQuote(COMMITMENT, EXPIRY, maker, POOL_KEY_HASH);
+
+        vm.prank(hook);
+        registry.consumeQuote(COMMITMENT);
+    }
+
+    function testGas_IsCommitted() public view {
+        registry.isCommitted(COMMITMENT);
+    }
+
+    function testGas_IsConsumed() public view {
+        registry.isConsumed(COMMITMENT);
+    }
+
+    function testGas_GetCommitment() public view {
+        registry.getCommitment(COMMITMENT);
+    }
 }

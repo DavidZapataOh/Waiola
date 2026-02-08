@@ -515,4 +515,344 @@ contract QuoteCommitmentTest is Test {
         assertEq(domain1, domain2);
         assertTrue(domain1 != bytes32(0));
     }
+
+    /*//////////////////////////////////////////////////////////////
+                      ADDITIONAL FUZZ TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testFuzz_HashQuote_Deterministic(
+        bytes32 _poolKeyHash,
+        address _taker,
+        uint256 _amountIn,
+        uint256 _quotedOut,
+        uint256 _expiry,
+        bytes32 _salt
+    ) public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: _poolKeyHash,
+            taker: _taker,
+            amountIn: _amountIn,
+            quotedOut: _quotedOut,
+            expiry: _expiry,
+            salt: _salt
+        });
+
+        // Hash should always be deterministic
+        assertEq(harness.hashQuote(quote), harness.hashQuote(quote));
+    }
+
+    function testFuzz_HashQuote_UniquePerInput(
+        uint256 _amountIn,
+        uint256 _quotedOut
+    ) public view {
+        vm.assume(_amountIn != _quotedOut);
+
+        QuoteCommitment.Quote memory quote1 = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: _amountIn,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        QuoteCommitment.Quote memory quote2 = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: _quotedOut,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        assertTrue(harness.hashQuote(quote1) != harness.hashQuote(quote2));
+    }
+
+    function testFuzz_VerifySignature(
+        bytes32 _poolKeyHash,
+        uint256 _amountIn,
+        uint256 _expiry,
+        bytes32 _salt
+    ) public view {
+        vm.assume(_amountIn > 0);
+        vm.assume(_expiry > 0);
+
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: _poolKeyHash,
+            taker: taker,
+            amountIn: _amountIn,
+            quotedOut: QUOTED_OUT,
+            expiry: _expiry,
+            salt: _salt
+        });
+
+        // Sign with correct key
+        bytes32 structHash = harness.hashQuote(quote);
+        bytes32 domainSeparator = harness.getDomainSeparator();
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(makerPrivateKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        // Should always verify with correct maker
+        assertTrue(harness.verifySignature(quote, signature, maker));
+    }
+
+    function testFuzz_ValidateQuote_ExpiryBoundary(uint256 timestamp) public {
+        vm.assume(timestamp > 0 && timestamp < type(uint256).max);
+
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: timestamp,
+            salt: salt
+        });
+
+        if (timestamp > 1) {
+            vm.warp(timestamp - 1);
+            // Should not revert (quote not expired yet)
+            harness.validateQuote(quote, taker, poolKeyHash);
+        }
+
+        vm.warp(timestamp);
+        // At exact expiry, should revert
+        vm.expectRevert(QuoteCommitment.QuoteCommitment__ExpiredQuote.selector);
+        harness.validateQuote(quote, taker, poolKeyHash);
+    }
+
+    function testFuzz_ComputeCommitment_UniquePerSalt(
+        bytes32 salt1,
+        bytes32 salt2
+    ) public view {
+        vm.assume(salt1 != salt2);
+
+        QuoteCommitment.Quote memory quote1 = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt1
+        });
+
+        QuoteCommitment.Quote memory quote2 = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt2
+        });
+
+        // Different salts must produce different commitments
+        assertTrue(
+            harness.computeCommitment(hasher, quote1) !=
+                harness.computeCommitment(hasher, quote2)
+        );
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       EDGE CASE TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_HashQuote_ZeroValues() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: bytes32(0),
+            taker: address(0),
+            amountIn: 0,
+            quotedOut: 0,
+            expiry: 0,
+            salt: bytes32(0)
+        });
+
+        bytes32 hash = harness.hashQuote(quote);
+        // Even with all zeros, hash should be non-zero (due to type hash)
+        assertTrue(hash != bytes32(0));
+    }
+
+    function test_ComputeCommitment_MaxValues() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: bytes32(type(uint256).max),
+            taker: address(type(uint160).max),
+            amountIn: type(uint256).max,
+            quotedOut: type(uint256).max,
+            expiry: type(uint256).max,
+            salt: bytes32(type(uint256).max)
+        });
+
+        bytes32 commitment = harness.computeCommitment(hasher, quote);
+        assertTrue(commitment != bytes32(0));
+    }
+
+    function test_VerifySignature_TamperedAmountIn() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        bytes32 structHash = harness.hashQuote(quote);
+        bytes32 domainSeparator = harness.getDomainSeparator();
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(makerPrivateKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        // Tamper with each field and verify rejection
+        quote.amountIn = AMOUNT_IN + 1;
+        assertFalse(harness.verifySignature(quote, signature, maker));
+    }
+
+    function test_VerifySignature_TamperedQuotedOut() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        bytes32 structHash = harness.hashQuote(quote);
+        bytes32 domainSeparator = harness.getDomainSeparator();
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(makerPrivateKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        quote.quotedOut = QUOTED_OUT - 1;
+        assertFalse(harness.verifySignature(quote, signature, maker));
+    }
+
+    function test_VerifySignature_TamperedTaker() public {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        bytes32 structHash = harness.hashQuote(quote);
+        bytes32 domainSeparator = harness.getDomainSeparator();
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(makerPrivateKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        quote.taker = makeAddr("attacker");
+        assertFalse(harness.verifySignature(quote, signature, maker));
+    }
+
+    function test_VerifySignature_TamperedExpiry() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        bytes32 structHash = harness.hashQuote(quote);
+        bytes32 domainSeparator = harness.getDomainSeparator();
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(makerPrivateKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        quote.expiry = EXPIRY + 3600;
+        assertFalse(harness.verifySignature(quote, signature, maker));
+    }
+
+    function test_VerifySignature_TamperedSalt() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        bytes32 structHash = harness.hashQuote(quote);
+        bytes32 domainSeparator = harness.getDomainSeparator();
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(makerPrivateKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        quote.salt = keccak256("tampered_salt");
+        assertFalse(harness.verifySignature(quote, signature, maker));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                          GAS BENCHMARKS
+    //////////////////////////////////////////////////////////////*/
+
+    function testGas_HashQuote() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        harness.hashQuote(quote);
+    }
+
+    function testGas_ComputeCommitment() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        harness.computeCommitment(hasher, quote);
+    }
+
+    function testGas_VerifySignature() public view {
+        QuoteCommitment.Quote memory quote = QuoteCommitment.Quote({
+            poolKeyHash: poolKeyHash,
+            taker: taker,
+            amountIn: AMOUNT_IN,
+            quotedOut: QUOTED_OUT,
+            expiry: EXPIRY,
+            salt: salt
+        });
+
+        bytes32 structHash = harness.hashQuote(quote);
+        bytes32 domainSeparator = harness.getDomainSeparator();
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(makerPrivateKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        harness.verifySignature(quote, signature, maker);
+    }
 }

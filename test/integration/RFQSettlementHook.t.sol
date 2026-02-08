@@ -21,6 +21,19 @@ import {QuoteCommitment} from "../../src/libraries/QuoteCommitment.sol";
 import {IVerifier} from "../../src/interfaces/IVerifier.sol";
 import {HonkVerifier} from "../../src/verifiers/NoirVerifier.sol";
 import {Poseidon2} from "@poseidon/src/Poseidon2.sol";
+import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
+
+/// @dev Test wrapper that skips hook address validation
+contract TestableRFQSettlementHook is RFQSettlementHook {
+    constructor(
+        IPoolManager pm,
+        IRFQRegistry r,
+        IVerifier v,
+        Poseidon2 h
+    ) RFQSettlementHook(pm, r, v, h) {}
+
+    function validateHookAddress(BaseHook) internal pure override {}
+}
 
 /**
  * @title RFQSettlementHookTest
@@ -51,7 +64,7 @@ contract RFQSettlementHookTest is Test {
     PoolId poolId;
 
     address deployer = address(this);
-    address maker = address(0x1111);
+    address maker;
     address taker = address(0x2222);
 
     uint256 makerPrivateKey = 0x1111;
@@ -62,6 +75,9 @@ contract RFQSettlementHookTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function setUp() public {
+        // 0. Derive maker address from private key
+        maker = vm.addr(makerPrivateKey);
+
         // 1. Deploy PoolManager
         poolManager = IPoolManager(address(new PoolManager(address(this))));
 
@@ -74,8 +90,8 @@ contract RFQSettlementHookTest is Test {
         // 4. Deploy Hasher
         hasher = new Poseidon2();
 
-        // 5. Deploy Hook
-        hook = new RFQSettlementHook(
+        // 5. Deploy Hook (test wrapper skips address validation)
+        hook = new TestableRFQSettlementHook(
             poolManager,
             IRFQRegistry(address(registry)),
             IVerifier(address(verifier)),
@@ -283,7 +299,7 @@ contract RFQSettlementHookTest is Test {
         assertFalse(used);
     }
 
-    function testFail_commitQuote_AlreadyExists() public {
+    function test_RevertWhen_commitQuote_AlreadyExists() public {
         uint256 expiry = block.timestamp + 1 hours;
         QuoteCommitment.Quote memory quote = createQuote(
             taker,
@@ -300,6 +316,12 @@ contract RFQSettlementHookTest is Test {
         registry.commitQuote(commitment, expiry, maker, poolKeyHash);
 
         // Second commit should fail
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                RFQRegistry.RFQRegistry__CommitmentAlreadyExists.selector,
+                commitment
+            )
+        );
         registry.commitQuote(commitment, expiry, maker, poolKeyHash);
     }
 
@@ -476,7 +498,9 @@ contract RFQSettlementHookTest is Test {
     }
 
     function test_beforeSwap_RevertsIf_ExpiredQuote() public {
-        // Create expired quote
+        // Warp to a reasonable timestamp so expiry - 1 is non-zero
+        // (registry uses expiry != 0 as existence check)
+        vm.warp(1000);
         uint256 expiry = block.timestamp - 1; // Already expired
         QuoteCommitment.Quote memory quote = createQuote(
             taker,
@@ -530,15 +554,89 @@ contract RFQSettlementHookTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
-                          GAS BENCHMARKS
+                       WRONG MAKER TESTS
     //////////////////////////////////////////////////////////////*/
 
-    /**
-     * @notice Gas benchmark for beforeSwap validation
-     * @dev This will be updated with real proof verification in Phase 3
-     */
-    function testGas_beforeSwap_FullValidation() public {
-        // Setup quote
+    function test_beforeSwap_RevertsIf_InvalidSignature() public {
+        uint256 expiry = block.timestamp + 1 hours;
+        QuoteCommitment.Quote memory quote = createQuote(
+            taker,
+            1 ether,
+            0.95 ether,
+            expiry,
+            keccak256("salt1")
+        );
+
+        bytes32 commitment = QuoteCommitment.computeCommitment(hasher, quote);
+
+        // Sign with a different private key (not the maker's)
+        bytes memory wrongSignature = _signWithWrongKey(quote);
+
+        // Commit quote
+        bytes32 poolKeyHash = keccak256(abi.encode(poolKey));
+        registry.commitQuote(commitment, expiry, maker, poolKeyHash);
+
+        bytes memory proof = generateMockProof();
+        bytes32[] memory publicInputs = generatePublicInputs(
+            commitment,
+            taker,
+            1 ether,
+            0.94 ether,
+            expiry
+        );
+
+        // Encode hookData with helper to reduce stack
+        bytes memory hookData = _encodeHookDataHelper(
+            quote,
+            maker,
+            wrongSignature,
+            proof,
+            publicInputs
+        );
+
+        SwapParams memory swapParams = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -1 ether,
+            sqrtPriceLimitX96: 0
+        });
+
+        // Should revert with InvalidSignature
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                RFQSettlementHook.RFQHook__InvalidSignature.selector,
+                maker,
+                address(0)
+            )
+        );
+
+        vm.prank(address(poolManager));
+        hook.beforeSwap(taker, poolKey, swapParams, hookData);
+    }
+
+    function _signWithWrongKey(
+        QuoteCommitment.Quote memory quote
+    ) internal view returns (bytes memory) {
+        uint256 wrongPrivateKey = 0x9999;
+        bytes32 domainSeparator = hook.getDomainSeparator();
+        bytes32 structHash = QuoteCommitment.hashQuote(quote);
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(wrongPrivateKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _encodeHookDataHelper(
+        QuoteCommitment.Quote memory quote,
+        address maker,
+        bytes memory signature,
+        bytes memory proof,
+        bytes32[] memory publicInputs
+    ) internal view returns (bytes memory) {
+        return encodeHookData(quote, maker, signature, proof, publicInputs);
+    }
+
+    function test_beforeSwap_RevertsIf_MakerMismatch() public {
         uint256 expiry = block.timestamp + 1 hours;
         QuoteCommitment.Quote memory quote = createQuote(
             taker,
@@ -551,9 +649,87 @@ contract RFQSettlementHookTest is Test {
         bytes32 commitment = QuoteCommitment.computeCommitment(hasher, quote);
         bytes memory signature = signQuote(quote);
 
-        // Commit quote
+        // Commit quote with correct maker
         bytes32 poolKeyHash = keccak256(abi.encode(poolKey));
         registry.commitQuote(commitment, expiry, maker, poolKeyHash);
+
+        bytes memory proof = generateMockProof();
+        bytes32[] memory publicInputs = generatePublicInputs(
+            commitment,
+            taker,
+            1 ether,
+            0.94 ether,
+            expiry
+        );
+
+        // Encode hookData will be done inside helper to save stack
+        _runTest_beforeSwap_RevertsIf_MakerMismatch(
+            quote,
+            signature,
+            commitment,
+            poolKeyHash,
+            proof,
+            publicInputs
+        );
+    }
+
+    function _runTest_beforeSwap_RevertsIf_MakerMismatch(
+        QuoteCommitment.Quote memory quote,
+        bytes memory signature,
+        bytes32 commitment,
+        bytes32 poolKeyHash,
+        bytes memory proof,
+        bytes32[] memory publicInputs
+    ) internal {
+        // Encode hookData with WRONG maker address
+        address wrongMaker = address(0x9999);
+        bytes memory hookData = encodeHookData(
+            quote,
+            wrongMaker, // <--- Wrong Maker
+            signature,
+            proof,
+            publicInputs
+        );
+
+        SwapParams memory swapParams = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -1 ether,
+            sqrtPriceLimitX96: 0
+        });
+
+        // Should revert with MakerMismatch
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                RFQSettlementHook.RFQHook__MakerMismatch.selector,
+                maker,
+                wrongMaker
+            )
+        );
+
+        vm.prank(address(poolManager));
+        hook.beforeSwap(taker, poolKey, swapParams, hookData);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       WRONG POOL TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_beforeSwap_RevertsIf_WrongPool() public {
+        uint256 expiry = block.timestamp + 1 hours;
+        QuoteCommitment.Quote memory quote = createQuote(
+            taker,
+            1 ether,
+            0.95 ether,
+            expiry,
+            keccak256("salt1")
+        );
+
+        bytes32 commitment = QuoteCommitment.computeCommitment(hasher, quote);
+        bytes memory signature = signQuote(quote);
+
+        // Commit quote with DIFFERENT pool key hash
+        bytes32 wrongPoolKeyHash = keccak256("wrong_pool");
+        registry.commitQuote(commitment, expiry, maker, wrongPoolKeyHash);
 
         bytes memory proof = generateMockProof();
         bytes32[] memory publicInputs = generatePublicInputs(
@@ -578,8 +754,239 @@ contract RFQSettlementHookTest is Test {
             sqrtPriceLimitX96: 0
         });
 
-        // Measure gas (will fail at proof verification, but we can see gas up to that point)
-        console2.log("\n=== Gas Benchmark ===");
-        console2.log("Validation gas cost will be measured in Phase 3");
+        bytes32 actualPoolKeyHash = keccak256(abi.encode(poolKey));
+
+        // Should revert with PoolMismatch
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                RFQSettlementHook.RFQHook__PoolMismatch.selector,
+                wrongPoolKeyHash,
+                actualPoolKeyHash
+            )
+        );
+
+        vm.prank(address(poolManager));
+        hook.beforeSwap(taker, poolKey, swapParams, hookData);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                      INVALID HOOKDATA TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_beforeSwap_RevertsIf_EmptyHookData() public {
+        SwapParams memory swapParams = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -1 ether,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.expectRevert(RFQSettlementHook.RFQHook__InvalidHookData.selector);
+
+        vm.prank(address(poolManager));
+        hook.beforeSwap(taker, poolKey, swapParams, hex"");
+    }
+
+    function test_beforeSwap_RevertsIf_ShortHookData() public {
+        SwapParams memory swapParams = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -1 ether,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.expectRevert(RFQSettlementHook.RFQHook__InvalidHookData.selector);
+
+        vm.prank(address(poolManager));
+        hook.beforeSwap(taker, poolKey, swapParams, hex"deadbeef");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                      DOMAIN SEPARATOR TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_domainSeparator_IsNonZero() public view {
+        bytes32 ds = hook.getDomainSeparator();
+        assertTrue(ds != bytes32(0));
+    }
+
+    function test_domainSeparator_IsConsistent() public view {
+        bytes32 ds1 = hook.getDomainSeparator();
+        bytes32 ds2 = hook.getDomainSeparator();
+        assertEq(ds1, ds2);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                      MULTIPLE QUOTES TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_multipleQuotes_IndependentCommitments() public {
+        uint256 expiry = block.timestamp + 1 hours;
+        bytes32 poolKeyHash = keccak256(abi.encode(poolKey));
+
+        // Create 3 different quotes with different salts
+        QuoteCommitment.Quote memory quote1 = createQuote(
+            taker,
+            1 ether,
+            0.95 ether,
+            expiry,
+            keccak256("salt1")
+        );
+        QuoteCommitment.Quote memory quote2 = createQuote(
+            taker,
+            2 ether,
+            1.90 ether,
+            expiry,
+            keccak256("salt2")
+        );
+        QuoteCommitment.Quote memory quote3 = createQuote(
+            taker,
+            3 ether,
+            2.85 ether,
+            expiry,
+            keccak256("salt3")
+        );
+
+        bytes32 commitment1 = QuoteCommitment.computeCommitment(hasher, quote1);
+        bytes32 commitment2 = QuoteCommitment.computeCommitment(hasher, quote2);
+        bytes32 commitment3 = QuoteCommitment.computeCommitment(hasher, quote3);
+
+        // All commitments should be unique
+        assertTrue(commitment1 != commitment2);
+        assertTrue(commitment2 != commitment3);
+        assertTrue(commitment1 != commitment3);
+
+        // Commit all
+        registry.commitQuote(commitment1, expiry, maker, poolKeyHash);
+        registry.commitQuote(commitment2, expiry, maker, poolKeyHash);
+        registry.commitQuote(commitment3, expiry, maker, poolKeyHash);
+
+        // All should be committed
+        assertTrue(registry.isCommitted(commitment1));
+        assertTrue(registry.isCommitted(commitment2));
+        assertTrue(registry.isCommitted(commitment3));
+
+        // None should be consumed
+        assertFalse(registry.isConsumed(commitment1));
+        assertFalse(registry.isConsumed(commitment2));
+        assertFalse(registry.isConsumed(commitment3));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       FUZZ TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testFuzz_commitQuote_Integration(
+        uint256 amountIn,
+        uint256 quotedOut,
+        bytes32 _salt
+    ) public {
+        vm.assume(amountIn > 0 && amountIn < type(uint128).max);
+        vm.assume(quotedOut > 0 && quotedOut < type(uint128).max);
+
+        uint256 expiry = block.timestamp + 1 hours;
+
+        QuoteCommitment.Quote memory quote = createQuote(
+            taker,
+            amountIn,
+            quotedOut,
+            expiry,
+            _salt
+        );
+
+        bytes32 commitment = QuoteCommitment.computeCommitment(hasher, quote);
+        bytes32 poolKeyHash = keccak256(abi.encode(poolKey));
+
+        registry.commitQuote(commitment, expiry, maker, poolKeyHash);
+
+        assertTrue(registry.isCommitted(commitment));
+        assertFalse(registry.isConsumed(commitment));
+    }
+
+    function testFuzz_signQuote_Integration(
+        uint256 amountIn,
+        uint256 quotedOut,
+        bytes32 _salt
+    ) public view {
+        vm.assume(amountIn > 0);
+        vm.assume(quotedOut > 0);
+
+        uint256 expiry = block.timestamp + 1 hours;
+
+        QuoteCommitment.Quote memory quote = createQuote(
+            taker,
+            amountIn,
+            quotedOut,
+            expiry,
+            _salt
+        );
+
+        bytes memory signature = signQuote(quote);
+
+        bool isValid = QuoteCommitment.verifySignature(
+            quote,
+            signature,
+            maker,
+            hook.getDomainSeparator()
+        );
+
+        assertTrue(isValid);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                          GAS BENCHMARKS
+    //////////////////////////////////////////////////////////////*/
+
+    function testGas_beforeSwap_CommitmentCheck() public {
+        uint256 expiry = block.timestamp + 1 hours;
+        QuoteCommitment.Quote memory quote = createQuote(
+            taker,
+            1 ether,
+            0.95 ether,
+            expiry,
+            keccak256("salt1")
+        );
+        bytes32 commitment = QuoteCommitment.computeCommitment(hasher, quote);
+        bytes32 poolKeyHash = keccak256(abi.encode(poolKey));
+
+        // Measure commitment check gas
+        registry.commitQuote(commitment, expiry, maker, poolKeyHash);
+        registry.isCommitted(commitment);
+        registry.isConsumed(commitment);
+    }
+
+    function testGas_computePoolKeyHash() public view {
+        hook.computePoolKeyHash(poolKey);
+    }
+
+    function testGas_signatureVerification() public view {
+        uint256 expiry = block.timestamp + 1 hours;
+        QuoteCommitment.Quote memory quote = createQuote(
+            taker,
+            1 ether,
+            0.95 ether,
+            expiry,
+            keccak256("salt1")
+        );
+
+        bytes memory signature = signQuote(quote);
+
+        QuoteCommitment.verifySignature(
+            quote,
+            signature,
+            maker,
+            hook.getDomainSeparator()
+        );
+    }
+
+    function testGas_commitmentComputation() public view {
+        uint256 expiry = block.timestamp + 1 hours;
+        QuoteCommitment.Quote memory quote = createQuote(
+            taker,
+            1 ether,
+            0.95 ether,
+            expiry,
+            keccak256("salt1")
+        );
+
+        QuoteCommitment.computeCommitment(hasher, quote);
     }
 }

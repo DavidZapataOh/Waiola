@@ -77,18 +77,24 @@ library QuoteCommitment {
      * @param quote Quote to commit
      * @return Commitment hash
      */
+    /// @dev BN254 scalar field prime — inputs to Poseidon2 must be < this value
+    uint256 internal constant BN254_PRIME =
+        0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001;
+
     function computeCommitment(
         Poseidon2 hasher,
         Quote memory quote
     ) internal pure returns (bytes32) {
         // Create array of 6 field elements
+        // Reduce 256-bit values mod BN254 prime to fit the field.
+        // Collision risk is negligible (~1/2^254) for hash outputs.
         Field.Type[] memory inputs = new Field.Type[](6);
-        inputs[0] = Field.toField(quote.poolKeyHash);
-        inputs[1] = Field.toField(quote.taker);
-        inputs[2] = Field.toField(quote.amountIn);
-        inputs[3] = Field.toField(quote.quotedOut);
-        inputs[4] = Field.toField(quote.expiry);
-        inputs[5] = Field.toField(quote.salt);
+        inputs[0] = Field.toField(uint256(quote.poolKeyHash) % BN254_PRIME);
+        inputs[1] = Field.toField(quote.taker); // 160 bits, always < PRIME
+        inputs[2] = Field.toField(quote.amountIn % BN254_PRIME);
+        inputs[3] = Field.toField(quote.quotedOut % BN254_PRIME);
+        inputs[4] = Field.toField(quote.expiry % BN254_PRIME);
+        inputs[5] = Field.toField(uint256(quote.salt) % BN254_PRIME);
 
         return Field.toBytes32(hasher.hash(inputs));
     }
@@ -153,7 +159,7 @@ library QuoteCommitment {
         address expectedTaker,
         bytes32 expectedPoolKeyHash
     ) internal view {
-        if (quote.expiry < block.timestamp) {
+        if (quote.expiry <= block.timestamp) {
             revert QuoteCommitment__ExpiredQuote();
         }
 
@@ -172,6 +178,6 @@ library QuoteCommitment {
      * @return True if expired
      */
     function isExpired(Quote memory quote) internal view returns (bool) {
-        return quote.expiry < block.timestamp;
+        return quote.expiry <= block.timestamp;
     }
 }

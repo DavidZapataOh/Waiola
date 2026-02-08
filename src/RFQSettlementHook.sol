@@ -284,7 +284,7 @@ contract RFQSettlementHook is BaseHook {
         SwapParams calldata params
     ) internal view {
         // Verify quote not expired
-        if (block.timestamp > data.quote.expiry) {
+        if (block.timestamp >= data.quote.expiry) {
             revert RFQHook__QuoteExpired(data.quote.expiry, block.timestamp);
         }
 

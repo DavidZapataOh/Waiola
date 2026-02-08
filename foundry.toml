@@ -14,7 +14,8 @@ optimizer_runs = 200
 fs_permissions = [
     { access = "read", path = "./proofs" },
     { access = "read", path = "./test" },
-    { access = "read", path = "./circuits" }
+    { access = "read", path = "./circuits" },
+    { access = "read-write", path = "./deployments" }
 ]
 
 # Gas reporting
