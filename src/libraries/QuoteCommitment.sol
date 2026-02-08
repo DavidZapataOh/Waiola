@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.27;
 
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
@@ -32,7 +32,9 @@ library QuoteCommitment {
     /// @notice EIP-712 type hash for Quote struct
     /// @dev keccak256("Quote(bytes32 poolKeyHash,address taker,uint256 amountIn,uint256 quotedOut,uint256 expiry,bytes32 salt)")
     bytes32 internal constant QUOTE_TYPEHASH =
-        0x8c3f3c9e5f0e4c1a6c1b9e8a2c9d8f7e6d5c4b3a2918273645546372819101112;
+        keccak256(
+            "Quote(bytes32 poolKeyHash,address taker,uint256 amountIn,uint256 quotedOut,uint256 expiry,bytes32 salt)"
+        );
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -73,11 +75,9 @@ library QuoteCommitment {
      * @param quote Quote to commit
      * @return Commitment hash
      */
-    function computeCommitment(Quote memory quote)
-        internal
-        pure
-        returns (bytes32)
-    {
+    function computeCommitment(
+        Quote memory quote
+    ) internal pure returns (bytes32) {
         // For MVP, use keccak256. In Phase 3, this will match Poseidon in Noir circuit
         return
             keccak256(

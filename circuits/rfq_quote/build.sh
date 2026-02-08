@@ -55,7 +55,7 @@ else
     exit 1
 fi
 
-$BB_PATH write_vk -b ./target/rfq_quote.json -o ./target/vk
+$BB_PATH write_vk --oracle_hash keccak -b ./target/rfq_quote.json -o ./target
 
 if [ $? -eq 0 ]; then
     echo "✅ Verification key generated"
@@ -67,7 +67,7 @@ echo ""
 
 # Step 3: Generate Solidity verifier
 echo "[3/4] Generating Solidity verifier contract..."
-$BB_PATH contract -k ./target/vk -c crs -b ./target/rfq_quote.json -o ./target/contract.sol
+$BB_PATH write_solidity_verifier -k ./target/vk -o ./target/contract.sol
 
 if [ $? -eq 0 ]; then
     echo "✅ Solidity verifier generated"

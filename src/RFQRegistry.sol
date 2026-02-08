@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.27;
 
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -17,10 +17,10 @@ contract RFQRegistry is Ownable2Step {
 
     /// @notice Commitment data stored onchain
     struct CommitmentData {
-        uint256 expiry;           // Quote expiry timestamp
-        address maker;            // Maker who signed the quote
-        bytes32 poolKeyHash;      // Hash of PoolKey
-        bool used;                // Anti-replay flag
+        uint256 expiry; // Quote expiry timestamp
+        address maker; // Maker who signed the quote
+        bytes32 poolKeyHash; // Hash of PoolKey
+        bool used; // Anti-replay flag
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -44,10 +44,7 @@ contract RFQRegistry is Ownable2Step {
         uint256 expiry
     );
 
-    event QuoteConsumed(
-        bytes32 indexed commitment,
-        address indexed consumer
-    );
+    event QuoteConsumed(bytes32 indexed commitment, address indexed consumer);
 
     event HookSet(address indexed hook);
 
@@ -162,7 +159,9 @@ contract RFQRegistry is Ownable2Step {
      * @param commitment Commitment hash
      * @return data CommitmentData struct
      */
-    function getCommitment(bytes32 commitment) external view returns (CommitmentData memory) {
+    function getCommitment(
+        bytes32 commitment
+    ) external view returns (CommitmentData memory) {
         return commitments[commitment];
     }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.27;
 
 /**
  * @title IRFQRegistry
@@ -61,7 +61,9 @@ interface IRFQRegistry {
 
     function isConsumed(bytes32 commitment) external view returns (bool);
 
-    function getCommitment(bytes32 commitment) external view returns (CommitmentData memory);
+    function getCommitment(
+        bytes32 commitment
+    ) external view returns (CommitmentData memory);
 
     function hook() external view returns (address);
 }

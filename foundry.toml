@@ -2,8 +2,7 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-solc_version = "0.8.26"
-evm_version = "cancun"
+solc_version = "0.8.27"
 
 # Critical for complex contracts (from iceberg pattern)
 via_ir = true
@@ -11,7 +10,7 @@ optimizer = true
 optimizer_runs = 200
 
 # Enable FFI for proof generation in tests
-ffi = true
+# ffi = true
 fs_permissions = [
     { access = "read", path = "./proofs" },
     { access = "read", path = "./test" },
@@ -20,6 +19,14 @@ fs_permissions = [
 
 # Gas reporting
 gas_reports = ["RFQSettlementHook", "RFQRegistry"]
+
+additional_compiler_profiles = [
+  { name = "no-ir", via_ir = false, optimizer = true, optimizer_runs = 200 }
+]
+
+compilation_restrictions = [
+  { paths = "src/verifiers/**", via_ir = false }
+]
 
 remappings = [
     "@uniswap/v4-core/=lib/v4-core/",
