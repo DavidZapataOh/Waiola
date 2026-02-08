@@ -14,3 +14,7 @@ docs/
 .env
 
 node_modules/
+
+maker-config.json
+policy.json
+ens-setup-summary.json

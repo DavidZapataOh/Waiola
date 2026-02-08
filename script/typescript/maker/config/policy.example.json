@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "spread": "0.1%",
+  "maxQuoteValidity": 300,
+  "pools": [
+    {
+      "tokenA": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "tokenB": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "fee": 3000,
+      "maxSlippage": "0.5%",
+      "maxAmount": "10000000000000000000",
+      "minAmount": "100000000000000000"
+    },
+    {
+      "tokenA": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "tokenB": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+      "fee": 3000,
+      "maxSlippage": "0.5%",
+      "maxAmount": "50000000000000000000",
+      "minAmount": "500000000000000000"
+    }
+  ],
+  "oracleValidation": {
+    "enabled": false,
+    "maxPriceDeviation": "2%",
+    "oracleAddress": "0x0000000000000000000000000000000000000000"
+  },
+  "_comment": "Example RFQ policy. Pools use mainnet addresses: WETH, USDC, DAI. Copy to policy.json and customize for your markets."
+}

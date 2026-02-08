@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "spread": "0.5%",
+  "maxQuoteValidity": 300,
+  "pools": [
+    {
+      "tokenA": "0x0000000000000000000000000000000000000000",
+      "tokenB": "0x1234567890123456789012345678901234567890",
+      "fee": 3000,
+      "maxSlippage": "0.5%",
+      "maxAmount": "1000000000000000000000",
+      "minAmount": "10000000000000000"
+    }
+  ],
+  "oracleValidation": {
+    "enabled": false,
+    "maxPriceDeviation": "2%"
+  }
+}
