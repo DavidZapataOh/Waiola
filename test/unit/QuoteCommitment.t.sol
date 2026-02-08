@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {QuoteCommitment} from "../../src/libraries/QuoteCommitment.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {Poseidon2} from "@poseidon/src/Poseidon2.sol";
 
 contract QuoteCommitmentHarness is EIP712 {
     constructor() EIP712("WaiolaRFQ", "1") {}
@@ -12,20 +13,17 @@ contract QuoteCommitmentHarness is EIP712 {
         return _domainSeparatorV4();
     }
 
-    function hashQuote(QuoteCommitment.Quote memory quote)
-        external
-        pure
-        returns (bytes32)
-    {
+    function hashQuote(
+        QuoteCommitment.Quote memory quote
+    ) external pure returns (bytes32) {
         return QuoteCommitment.hashQuote(quote);
     }
 
-    function computeCommitment(QuoteCommitment.Quote memory quote)
-        external
-        pure
-        returns (bytes32)
-    {
-        return QuoteCommitment.computeCommitment(quote);
+    function computeCommitment(
+        Poseidon2 hasher,
+        QuoteCommitment.Quote memory quote
+    ) external pure returns (bytes32) {
+        return QuoteCommitment.computeCommitment(hasher, quote);
     }
 
     function verifySignature(
@@ -67,17 +65,16 @@ contract QuoteCommitmentHarness is EIP712 {
         );
     }
 
-    function isExpired(QuoteCommitment.Quote memory quote)
-        external
-        view
-        returns (bool)
-    {
+    function isExpired(
+        QuoteCommitment.Quote memory quote
+    ) external view returns (bool) {
         return QuoteCommitment.isExpired(quote);
     }
 }
 
 contract QuoteCommitmentTest is Test {
     QuoteCommitmentHarness public harness;
+    Poseidon2 public hasher;
 
     address maker;
     uint256 makerPrivateKey;
@@ -95,6 +92,7 @@ contract QuoteCommitmentTest is Test {
 
     function setUp() public {
         harness = new QuoteCommitmentHarness();
+        hasher = new Poseidon2();
 
         // Create maker with known private key for signing
         makerPrivateKey = 0x1234;
@@ -157,10 +155,10 @@ contract QuoteCommitmentTest is Test {
             salt: salt
         });
 
-        bytes32 commitment = harness.computeCommitment(quote);
+        bytes32 commitment = harness.computeCommitment(hasher, quote);
 
         // Commitment should be deterministic
-        assertEq(commitment, harness.computeCommitment(quote));
+        assertEq(commitment, harness.computeCommitment(hasher, quote));
 
         // Commitment should be non-zero
         assertTrue(commitment != bytes32(0));
@@ -187,8 +185,8 @@ contract QuoteCommitmentTest is Test {
 
         // Different salts should produce different commitments
         assertTrue(
-            harness.computeCommitment(quote1) !=
-                harness.computeCommitment(quote2)
+            harness.computeCommitment(hasher, quote1) !=
+                harness.computeCommitment(hasher, quote2)
         );
     }
 
@@ -209,10 +207,10 @@ contract QuoteCommitmentTest is Test {
             salt: _salt
         });
 
-        bytes32 commitment = harness.computeCommitment(quote);
+        bytes32 commitment = harness.computeCommitment(hasher, quote);
 
         // Commitment should always be deterministic
-        assertEq(commitment, harness.computeCommitment(quote));
+        assertEq(commitment, harness.computeCommitment(hasher, quote));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -382,9 +380,7 @@ contract QuoteCommitmentTest is Test {
         });
 
         // Should revert with ExpiredQuote
-        vm.expectRevert(
-            QuoteCommitment.QuoteCommitment__ExpiredQuote.selector
-        );
+        vm.expectRevert(QuoteCommitment.QuoteCommitment__ExpiredQuote.selector);
         harness.validateQuote(quote, taker, poolKeyHash);
     }
 
@@ -403,9 +399,7 @@ contract QuoteCommitmentTest is Test {
         address wrongTaker = makeAddr("wrong_taker");
 
         // Should revert with InvalidTaker
-        vm.expectRevert(
-            QuoteCommitment.QuoteCommitment__InvalidTaker.selector
-        );
+        vm.expectRevert(QuoteCommitment.QuoteCommitment__InvalidTaker.selector);
         harness.validateQuote(quote, wrongTaker, poolKeyHash);
     }
 
@@ -496,7 +490,7 @@ contract QuoteCommitmentTest is Test {
         });
 
         // 2. Compute commitment
-        bytes32 commitment = harness.computeCommitment(quote);
+        bytes32 commitment = harness.computeCommitment(hasher, quote);
         assertTrue(commitment != bytes32(0));
 
         // 3. Maker signs quote

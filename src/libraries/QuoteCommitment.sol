@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {Poseidon2, Field} from "@poseidon/src/Poseidon2.sol";
 
 /**
  * @title QuoteCommitment
@@ -70,26 +71,26 @@ library QuoteCommitment {
     }
 
     /**
-     * @notice Compute commitment hash (Poseidon-like, but using keccak256 for MVP)
+     * @notice Compute commitment hash
      * @dev In production, this would use Poseidon hash matching the Noir circuit
+     * @param hasher Poseidon2 contract instance
      * @param quote Quote to commit
      * @return Commitment hash
      */
     function computeCommitment(
+        Poseidon2 hasher,
         Quote memory quote
     ) internal pure returns (bytes32) {
-        // For MVP, use keccak256. In Phase 3, this will match Poseidon in Noir circuit
-        return
-            keccak256(
-                abi.encodePacked(
-                    quote.poolKeyHash,
-                    quote.taker,
-                    quote.amountIn,
-                    quote.quotedOut,
-                    quote.expiry,
-                    quote.salt
-                )
-            );
+        // Create array of 6 field elements
+        Field.Type[] memory inputs = new Field.Type[](6);
+        inputs[0] = Field.toField(quote.poolKeyHash);
+        inputs[1] = Field.toField(quote.taker);
+        inputs[2] = Field.toField(quote.amountIn);
+        inputs[3] = Field.toField(quote.quotedOut);
+        inputs[4] = Field.toField(quote.expiry);
+        inputs[5] = Field.toField(quote.salt);
+
+        return Field.toBytes32(hasher.hash(inputs));
     }
 
     /*//////////////////////////////////////////////////////////////
