@@ -7,7 +7,7 @@ solc_version = "0.8.27"
 # Critical for complex contracts (from iceberg pattern)
 via_ir = true
 optimizer = true
-optimizer_runs = 200
+optimizer_runs = 20
 
 # Enable FFI for proof generation in tests
 # ffi = true
@@ -22,7 +22,7 @@ fs_permissions = [
 gas_reports = ["RFQSettlementHook", "RFQRegistry"]
 
 additional_compiler_profiles = [
-  { name = "no-ir", via_ir = false, optimizer = true, optimizer_runs = 200 }
+  { name = "no-ir", via_ir = false, optimizer = true, optimizer_runs = 20 }
 ]
 
 compilation_restrictions = [

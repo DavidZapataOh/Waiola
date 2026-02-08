@@ -32,7 +32,20 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Load environment
-if [ -f .env ]; then
+
+# Resolve script directory and project root
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Change to project root to ensure forge commands work
+cd "$PROJECT_ROOT"
+
+# Load environment
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    echo "Loading .env from script directory..."
+    source "$SCRIPT_DIR/.env"
+elif [ -f .env ]; then
+    echo "Loading .env from project root..."
     source .env
 else
     echo -e "${RED}ERROR: .env file not found. Copy .env.example to .env and configure it.${NC}"

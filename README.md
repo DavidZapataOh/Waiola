@@ -146,7 +146,7 @@ The `quoted_out` (exact price the maker offered) stays hidden inside the proof. 
 
 | Network | Registry | Hook | Verifier | Hasher |
 |---------|----------|------|----------|--------|
-| **Sepolia** | `0x...` | `0x...` | `0x...` | `0x...` |
+| **Sepolia** | `0xF92349c57C0A19e3981AF2e338eC6704278C5C8c` | `0x341078fC1dEa2D67dd8582F9E8Ac03A4D8f28080` | `0x2fA86B594D954C695C9421972Aeb87A241cEC80b` | `0x974433B8ab1eaFCC7B339Ae5D08BBaD82C9795B6` |
 | **Base Sepolia** | `0x...` | `0x...` | `0x...` | `0x...` |
 | **Arbitrum Sepolia** | `0x...` | `0x...` | `0x...` | `0x...` |
 
@@ -154,7 +154,7 @@ The `quoted_out` (exact price the maker offered) stays hidden inside the proof. 
 
 | Step | Network | TXID |
 |------|---------|------|
-| Deploy | Sepolia | `0x...` |
+| Deploy | Sepolia | `0x01fb9fe7df63a92976e79a9cd4e16e1f0011bb8942b55f5bfcf7d674aa80b169` |
 | Commit Quote | Sepolia | `0x...` |
 | Swap (success) | Sepolia | `0x...` |
 | Replay (reverts) | Sepolia | `0x...` |
